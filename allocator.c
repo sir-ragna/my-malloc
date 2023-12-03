@@ -89,7 +89,7 @@ init_allocator() {
 
 /* dead simple malloc implementation */
 void* 
-ds_malloc(int requested) {
+ds_malloc(unsigned long long requested) {
     if (heap_start == NULL)
         init_allocator();
     
@@ -98,14 +98,12 @@ ds_malloc(int requested) {
         return NULL;
     }
 
-    void* prev_end = heap_end;
-    MMarker mmarker = {0};
     if (heap_start == heap_end) {
         /* There is no marker yet
-         *     Allocate requested + marker
-         *     Set marker
+         *   allocate the first block
+         *   allocated requested size + marker block
          **/
-        // printf("current break %p, requested %p\n", heap_end, (void*)(((char*)heap_end) + sizeof(MMarker) + requested));
+        void* prev_end = heap_end;
         heap_end = brk_syscall((void*)(((char*)heap_end) + sizeof(MMarker) + requested));
 
         /* Was the allocation a success? */
@@ -114,20 +112,130 @@ ds_malloc(int requested) {
             return NULL;
         }
 
-        /* set memory marker */
-        mmarker.next_marker = NULL;
-        mmarker.occupied = 1;
-        memcpy(prev_end, &mmarker, sizeof(MMarker));
+        /* set the first memory marker */
+        MMarker* mmarker = (MMarker*)heap_start;
+        mmarker->next_marker = NULL;
+        mmarker->occupied = 1;
 
-        /* return the start of the new block */
-        return prev_end + sizeof(MMarker);
+        /* return the address after the first block */
+        return (void*)((unsigned long long)heap_start + sizeof(MMarker));
     }
 
-    return NULL;
+    /* look for an unoccupied block that is big enough */
+    MMarker* mmarker = (MMarker*)heap_start;
+    while (mmarker->next_marker != NULL) {
+        if (mmarker->occupied == 0) {
+            wstdout("unoccupied marker found\n");
+            /* unoccupied memory space, is it big enough? */
+            if (((unsigned long long)mmarker->next_marker) - ((unsigned long long)mmarker) > requested + (2 * sizeof(MMarker))) {
+                wstdout("unoccupied marker is big enough\n");
+                /* create a new marker at the end */
+                MMarker* new_marker = (MMarker*)(((unsigned long long)mmarker) + sizeof(MMarker) + requested);
+                /* set the new marker as free, while the old one as occupied */
+                new_marker->occupied = 0;
+                mmarker->occupied = 1;
+                /* let the new marker point to the next marker
+                 * while the old marker needs to point to the new marker */
+                new_marker->next_marker = mmarker->next_marker;
+                mmarker->next_marker = new_marker;
+
+                /* return the address right behind the marker */
+                return (void*)((unsigned long long)mmarker) + sizeof(MMarker);
+            }
+        } else {
+            wstdout("occupied marker ");
+            ptrToStr(mmarker);
+            wstdout(ptrToStrResult);
+            wstdout("\n");
+        }
+        mmarker = mmarker->next_marker;
+    }
+    /* mmarker contains the last block. */
+    if (mmarker->occupied == 0) {
+        /* last block is not occupied, we can use it */
+        mmarker->occupied = 1;
+        /* resize the block to the exact size we need */
+        wstdout("resizing the last block to fit\n");
+        heap_end = brk_syscall((void*)((unsigned long long)mmarker + sizeof(MMarker) + requested));
+        return (void*)((unsigned long long)mmarker + sizeof(MMarker));
+    }
+
+    /* the last block is occupied, we need to allocated a new block at the end */
+    void* new_end = brk_syscall((void*)((unsigned long long)heap_end + sizeof(MMarker) + requested));
+    if (new_end == heap_end) {
+        wstdout("failed to  ");
+        ptrToStr(mmarker);
+        wstdout(ptrToStrResult);
+        wstdout("\n"); 
+    }
+    /* set the marker at the previous heap_end */
+    MMarker * new_mmarker = heap_end;
+    new_mmarker-> occupied = 0;
+    new_mmarker->next_marker = NULL;
+    /* let the previous mmarker point to the new block */
+    mmarker->next_marker = new_mmarker;
+    /* fix the heap_end */
+    heap_end = new_end;
+
+    return (void*) ((unsigned long long)new_mmarker + sizeof(MMarker));
+}
+
+/* dead simple free */
+void
+ds_free(void* ptr) {
+    /* mark the block as freed */
+    MMarker* mmarker = (MMarker*)((unsigned long long)ptr - sizeof(MMarker));
+    mmarker->occupied = 0;
+    
+    /* scan blocks for multiple unoccupied blocks */
+
+    /* remove unoccupied blocks at the end */
+
+}
+
+void
+ds_print_heap_layout() {
+    if (heap_start == heap_end) {
+        wstdout("the heap is zero sized\n");
+        return;
+    }
+
+    wstdout("the start of the heap: ");
+    ptrToStr(heap_start);
+    wstdout(ptrToStrResult);
+    wstdout("\n");
+
+    MMarker *mmarker = heap_start;
+    while (mmarker->next_marker != NULL) {
+        wstdout("first marker: ");
+        ptrToStr(mmarker);
+        wstdout(ptrToStrResult);
+        if (mmarker->occupied == 0) {
+            wstdout(" FREE");
+        } else {
+            wstdout(" occupied");
+        }
+        wstdout("\n");
+        mmarker = mmarker->next_marker;
+    }
+    wstdout("last marker: ");
+    ptrToStr(mmarker);
+    wstdout(ptrToStrResult);
+    if (mmarker->occupied == 0) {
+        wstdout(" FREE");
+    } else {
+        wstdout(" occupied");
+    }
+    wstdout("\n");
+    wstdout("the end of the heap: ");
+    ptrToStr(heap_end);
+    wstdout(ptrToStrResult);
+    wstdout("\n");
 }
 
 int
 main() {
+    ds_print_heap_layout();
     char* text = "abcdefghijklmnopqrstuvwxyz";
     char* buffer = (char *)ds_malloc(512); // get me 512 bytes of memory
     if (buffer == NULL) {
@@ -137,5 +245,6 @@ main() {
     memcpy(buffer, text, strlen(text));
     wstdout(buffer);
     wstdout("\n");
+    ds_print_heap_layout();
     return 0;
 }

@@ -188,12 +188,12 @@ ds_free(void* ptr) {
     /* mmarker now contains the last block, if it is free shrink the heap
      * if it happens to also be the first block, remove the heap */
     if (mmarker->occupied == 0 && mmarker == heap_start) {
-        wstdout("removing heap completely\n");
+        //wstdout("removing heap completely\n");
         brk_syscall(heap_start);
         heap_start = NULL;
         heap_end = NULL;
     } else if (mmarker->occupied) {
-        wstdout("trimming heap\n");
+        //wstdout("trimming heap\n");
         brk_syscall((void*) (((unsigned long long)mmarker) + sizeof(MMarker)));
     }
 }

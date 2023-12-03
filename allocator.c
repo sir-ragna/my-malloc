@@ -1,9 +1,4 @@
 #include <string.h>
-// /* Not going to rely on imports for these */
-// #define NULL 0
-// #define stdin 0
-// #define stdout 1
-// #define stderr 2
 
 // COMPILATION:
 //     nasm -f elf64 brk.asm
@@ -13,21 +8,6 @@
  * success. We need to use the actual pure syscall.
  * defined in 'brk.asm' */
 void* brk_syscall(void *);
-
-/* to avoid that glibc starts to allocate memory with brk itself 
- * using glibc functions should be avoided. In order to troubleshoot
- * and test my own allocator, I'm going to implement some of my own 
- * version to print some strings */
-
-/* strlen variant */
-// int strlen(char *str) {
-//     int result = 0;
-//     while (*str != '\0') {
-//         str++;
-//         result++;
-//     }
-//     return result;
-// }
 
 /* defined in 'write.asm'. Uses the write syscall */
 int write_out(int stream, char* str, int len);
@@ -62,8 +42,6 @@ char* ptrToStr(void* ptr) {
     ptrToStrResult[19] = '\0';
     return ptrToStrResult;
 }
-
-/* end of glibc-like functions */
 
 /* Memory Marker
  * functions as a single linked list */
@@ -230,8 +208,7 @@ ds_print_heap_layout() {
     }
     wstdout("\n");
     wstdout("the end of the heap: ");
-    ptrToStr(heap_end);
-    wstdout(ptrToStrResult);
+    wstdout(ptrToStr(heap_end));
     wstdout("\n");
 }
 

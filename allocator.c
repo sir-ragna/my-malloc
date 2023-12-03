@@ -49,7 +49,7 @@ char tohex[] = {'0', '1', '2', '3', '4', '5', '6', '7',
 char ptrToStrResult[512] = { 0 };
 /* stores the result in ptrToStrResult 
  * This is to avoid dynamic memory allocation */
-void ptrToStr(void* ptr) {
+char* ptrToStr(void* ptr) {
     ptrToStrResult[0] = '0';
     ptrToStrResult[1] = 'x'; // start with 0x
 
@@ -60,6 +60,7 @@ void ptrToStr(void* ptr) {
         bit64int <<= 4; // shift a nible
     }
     ptrToStrResult[19] = '\0';
+    return ptrToStrResult;
 }
 
 /* end of glibc-like functions */
@@ -74,24 +75,14 @@ typedef struct MMarker {
 void* heap_start = NULL;
 void* heap_end = NULL; // also called the break
 
-void 
-init_allocator() {
-    /* get the current break */
-    heap_start = brk_syscall(NULL);
-    heap_end = heap_start;
-
-    /* debugging info */
-    wstdout("initializing allocator at: ");
-    ptrToStr(heap_start);
-    wstdout(ptrToStrResult);
-    wstdout("\n");
-}
-
 /* dead simple malloc implementation */
 void* 
 ds_malloc(unsigned long long requested) {
-    if (heap_start == NULL)
-        init_allocator();
+    if (heap_start == NULL) {
+        /* get the current break */
+        heap_start = brk_syscall(NULL);
+        heap_end = heap_start;
+    }
     
     if (requested == 0) {
         wstderr("zero bytes requested, returning NULL\n");
@@ -125,16 +116,10 @@ ds_malloc(unsigned long long requested) {
     MMarker* mmarker = heap_start;
     while (mmarker->next_marker != NULL) {
         if (mmarker->occupied == 0) {
-            wstdout("unoccupied marker found\n");
             /* unoccupied memory space, is it big enough? */
             if (((unsigned long long)mmarker->next_marker) - ((unsigned long long)mmarker) > requested + (2 * sizeof(MMarker))) {
-                wstdout("unoccupied marker is big enough\n");
                 /* create a new marker at the end */
                 MMarker* new_marker = (MMarker*)(((unsigned long long)mmarker) + sizeof(MMarker) + requested);
-                wstdout("Creating new marker at ");
-                ptrToStr(new_marker);
-                wstdout(ptrToStrResult);
-                wstdout("\n");
                 /* set the new marker as free, while the old one as occupied */
                 new_marker->occupied = 0;
                 mmarker->occupied = 1;
@@ -146,11 +131,6 @@ ds_malloc(unsigned long long requested) {
                 /* return the address right behind the marker */
                 return (void*)((unsigned long long)mmarker) + sizeof(MMarker);
             }
-        } else {
-            wstdout("occupied marker ");
-            ptrToStr(mmarker);
-            wstdout(ptrToStrResult);
-            wstdout("\n");
         }
         mmarker = mmarker->next_marker;
     }
@@ -167,8 +147,7 @@ ds_malloc(unsigned long long requested) {
     void* new_end = brk_syscall((void*)(((unsigned long long)heap_end) + sizeof(MMarker) + requested));
     if (new_end == heap_end) {
         wstderr("failed to  ");
-        ptrToStr(mmarker);
-        wstderr(ptrToStrResult);
+        wstderr(ptrToStr(mmarker));
         wstderr("\n"); 
     }
     /* set the marker at the previous heap_end */
@@ -195,9 +174,28 @@ ds_free(void* ptr) {
     mmarker->occupied = 0;
     
     /* scan blocks for multiple unoccupied blocks */
+    mmarker = (MMarker*)heap_start;
+    while (mmarker->next_marker != NULL) {
+        /* check if we have two markers next to each-other that are free */
+        if (mmarker->occupied == 0 && ((MMarker*)mmarker->next_marker)->occupied == 0) {
+            /* absorb the second marker into the first*/
+            mmarker->next_marker = ((MMarker*)mmarker->next_marker)->next_marker;
+        } else {
+            mmarker = mmarker->next_marker;
+        }
+    }
 
-    /* remove unoccupied blocks at the end */
-
+    /* mmarker now contains the last block, if it is free shrink the heap
+     * if it happens to also be the first block, remove the heap */
+    if (mmarker->occupied == 0 && mmarker == heap_start) {
+        wstdout("removing heap completely\n");
+        brk_syscall(heap_start);
+        heap_start = NULL;
+        heap_end = NULL;
+    } else if (mmarker->occupied) {
+        wstdout("trimming heap\n");
+        brk_syscall((void*) (((unsigned long long)mmarker) + sizeof(MMarker)));
+    }
 }
 
 void
@@ -208,15 +206,13 @@ ds_print_heap_layout() {
     }
 
     wstdout("the start of the heap: ");
-    ptrToStr(heap_start);
-    wstdout(ptrToStrResult);
+    wstdout(ptrToStr(heap_start));
     wstdout("\n");
 
     MMarker *mmarker = heap_start;
     while (mmarker->next_marker != NULL) {
         wstdout("marker: ");
-        ptrToStr(mmarker);
-        wstdout(ptrToStrResult);
+        wstdout(ptrToStr(mmarker));
         if (mmarker->occupied == 0) {
             wstdout(" FREE");
         } else {
@@ -226,8 +222,7 @@ ds_print_heap_layout() {
         mmarker = mmarker->next_marker;
     }
     wstdout("marker: ");
-    ptrToStr(mmarker);
-    wstdout(ptrToStrResult);
+    wstdout(ptrToStr(mmarker));
     if (mmarker->occupied == 0) {
         wstdout(" FREE (last)");
     } else {
@@ -256,14 +251,13 @@ main() {
     wstdout("----- lets allocates some pointers ---\n");
     void** ptrs = (void**)ds_malloc(1024 * sizeof(void*));
     wstdout("----- start allocating 1024 pointers ---\n");
-    for (size_t i = 1; i < 200; i++)
+    for (size_t i = 1; i < 1024; i++)
     {
-        wstdout("- allocated 1 more \n");
         void * ptr = ds_malloc(i);
         ptrs[i - 1] = ptr;
     }
     ds_print_heap_layout();
-    for (size_t i = 1; i < 200; i++)
+    for (size_t i = 1; i < 1024; i++)
     {
         ds_free(ptrs[i - 1]);
     }

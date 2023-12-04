@@ -11,7 +11,6 @@ Modern Linux relies mainly on `mmap` instead of `brk` for memory allocation.
 
 Using `brk` directly and `malloc` or other libc functions that rely on 
 malloc is a recipe for disaster. This is why you don't see any `printf` 
-usage in this software but I'm also using the `write` systemcall for output.
-
+usage in this program. I'm relying on the write system call for output.
 
 
